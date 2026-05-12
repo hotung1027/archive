@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      refresh_cards:
+        description: Re-fetch card data instead of using this week's cache
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -43,13 +49,40 @@ jobs:
           fi
           echo "NEXT_PUBLIC_STATIC_EXPORT=true" >> "$GITHUB_ENV"
 
+      - name: Compute card data cache key
+        id: card-cache-key
+        shell: bash
+        run: |
+          period="$(date -u +'%G-W%V')"
+          echo "prefix=gatcg-cards-${{ runner.os }}-${period}-" >> "$GITHUB_OUTPUT"
+          echo "key=gatcg-cards-${{ runner.os }}-${period}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore static card data cache
+        id: cards-cache
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.refresh_cards == false }}
+        uses: actions/cache/restore@v4
+        with:
+          path: apps/web/public/data/cards.json
+          key: ${{ steps.card-cache-key.outputs.key }}
+          restore-keys: |
+            ${{ steps.card-cache-key.outputs.prefix }}
+
       - name: Build SQLite card database
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.refresh_cards == true) || steps.cards-cache.outputs.cache-matched-key == '' }}
         run: |
           bun run db:migrate
           bun run db:seed
 
       - name: Export static card data
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.refresh_cards == true) || steps.cards-cache.outputs.cache-matched-key == '' }}
         run: bun run static:data
+
+      - name: Save static card data cache
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.refresh_cards == true) || steps.cards-cache.outputs.cache-matched-key == '' }}
+        uses: actions/cache/save@v4
+        with:
+          path: apps/web/public/data/cards.json
+          key: ${{ steps.card-cache-key.outputs.key }}
 
       - name: Build static Next.js site
         run: bun run static:build
