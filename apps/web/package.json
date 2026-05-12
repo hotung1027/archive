@@ -1,0 +1,28 @@
+{
+  "name": "@omnisearch/web",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "bun --bun next dev --turbopack",
+    "build": "bun --bun next build",
+    "start": "bun --bun next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@omnisearch/db": "workspace:*",
+    "@omnisearch/types": "workspace:*",
+    "@tanstack/react-query": "^5.28.0",
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "@tailwindcss/postcss": "^4.0.0",
+    "typescript": "^5.4.0"
+  }
+}

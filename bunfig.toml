@@ -1,0 +1,12 @@
+# Bun workspace config
+[install]
+# Deduplicate packages in workspace node_modules
+shamefullyHoist = true
+
+[install.cache]
+# Reuse global Bun cache across installs
+dir = "~/.bun/install/cache"
+
+[run]
+# Allow bun run to resolve workspace scripts from any sub-package
+silent = false

@@ -1,0 +1,28 @@
+{
+  "name": "omnisearch",
+  "version": "0.0.1",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run --cwd apps/web dev",
+    "build": "bun run --cwd apps/web build",
+    "wasm:build": "cd packages/search-wasm && wasm-pack build --target web --out-dir ../search-wasm-bindings/wasm",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun run --cwd packages/db migrate",
+    "db:seed": "bun scripts/fetch-cards.ts",
+    "static:data": "bun scripts/export-static-data.ts",
+    "static:build": "bun scripts/build-static-site.ts",
+    "db:studio": "bun run --cwd packages/db studio",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.41.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "drizzle-kit": "^0.30.0"
+  }
+}
