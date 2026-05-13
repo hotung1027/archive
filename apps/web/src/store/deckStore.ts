@@ -47,6 +47,9 @@ interface DeckStore {
   removeAllFromSideboard: (slug: string) => void;
   clearSideboard:         () => void;
 
+  // Bulk import — replaces all entries without enforcing copy limits
+  importEntries: (entries: DeckCard[], sideboardEntries: DeckCard[]) => void;
+
   // Computed helpers
   totalCards:             () => number;
   countOf:                (slug: string) => number;
@@ -129,6 +132,9 @@ export const useDeckStore = create<DeckStore>()(
       })),
 
       clearSideboard: () => set({ sideboardEntries: [] }),
+
+      importEntries: (newEntries, newSideboard) =>
+        set({ entries: newEntries, sideboardEntries: newSideboard }),
 
       totalCards: () => get().entries.reduce((sum, e) => sum + e.quantity, 0),
 

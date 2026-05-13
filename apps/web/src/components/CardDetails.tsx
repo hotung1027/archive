@@ -8,6 +8,7 @@ import {
   useDeckStore, isMaterialCard,
   MATERIAL_COPY_LIMIT, MAIN_COPY_LIMIT,
 } from '@/store/deckStore';
+import { usePriceStore, formatPrice } from '@/store/priceStore';
 import { parseDbCard } from '@/lib/parseCard';
 import { fetchStaticEditions, isStaticExport } from '@/lib/staticCardData';
 
@@ -134,6 +135,7 @@ function EffectText({ text, className = 'text-sm leading-relaxed text-gray-200' 
 
 export function CardDetails({ group }: CardDetailsProps) {
   const { addCard, countOf, canAddCard, addToSideboard, canAddToSideboard, countInSideboard } = useDeckStore();
+  const { prices } = usePriceStore();
 
   // Track which edition the user has picked; reset when the card name changes
   const [activeEditionSlug, setActiveEditionSlug] = useState<string | null>(null);
@@ -316,6 +318,16 @@ export function CardDetails({ group }: CardDetailsProps) {
             <DetailRow label="Illustrator" value={card.illustrator} />
             <DetailRow label="Config" value={rawValue(sourceEdition, 'configuration')} />
             <DetailRow label="Orientation" value={rawValue(sourceEdition, 'orientation')} />
+            {prices[card.name] && (
+              <DetailRow
+                label="Price"
+                value={
+                  <span className="font-medium text-green-400">
+                    {formatPrice(prices[card.name].cents, prices[card.name].currency)}
+                  </span>
+                }
+              />
+            )}
           </dl>
         </Section>
 

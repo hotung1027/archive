@@ -6,7 +6,12 @@ import {
   MATERIAL_DECK_EXACT, MAIN_DECK_MIN, SIDEBOARD_MAX,
 } from '@/store/deckStore';
 import type { DeckCard } from '@/store/deckStore';
+import { usePriceStore, formatPrice } from '@/store/priceStore';
+import type { PriceEntry } from '@/store/priceStore';
 import type { Card } from '@omnisearch/types';
+import { parseDbCard } from '@/lib/parseCard';
+import type { ApiCard } from '@/lib/parseCard';
+import { fetchStaticCards, isStaticExport } from '@/lib/staticCardData';
 
 interface DeckSidebarProps {
   selectedSlug: string | null;
@@ -19,6 +24,10 @@ export function DeckSidebar({ selectedSlug, onSelectCard }: DeckSidebarProps) {
   const [hoverY, setHoverY] = useState(0);
   const [showExport, setShowExport] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
+  const [importError, setImportError] = useState('');
 
   const {
     deckName, format, entries,
@@ -26,7 +35,10 @@ export function DeckSidebar({ selectedSlug, onSelectCard }: DeckSidebarProps) {
     addCard, removeCard, removeAllOf,
     addToSideboard, removeFromSideboard, removeAllFromSideboard,
     clearDeck, clearSideboard, deckStats,
+    importEntries,
   } = useDeckStore();
+
+  const { prices } = usePriceStore();
 
   const sideboardEntries = rawSideboard ?? [];
   const stats = deckStats();
@@ -58,6 +70,96 @@ export function DeckSidebar({ selectedSlug, onSelectCard }: DeckSidebarProps) {
       setTimeout(() => setCopied(false), 1800);
     } catch {
       // ignore
+    }
+  }
+
+  function parseDeckList(text: string): { name: string; qty: number; section: 'material' | 'main' | 'sideboard' }[] {
+    const result: { name: string; qty: number; section: 'material' | 'main' | 'sideboard' }[] = [];
+    let section: 'material' | 'main' | 'sideboard' = 'main';
+    for (const rawLine of text.split('\n')) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('//')) continue;
+      if (line.startsWith('#')) {
+        const lower = line.toLowerCase();
+        if (lower.includes('material')) section = 'material';
+        else if (lower.includes('side')) section = 'sideboard';
+        else section = 'main';
+        continue;
+      }
+      // Support "SB: 1 CardName" sideboard prefix (Arena/similar formats)
+      const sbPrefix = line.match(/^SB:\s*(\d+)\s+(.+)$/i);
+      if (sbPrefix) {
+        result.push({ qty: parseInt(sbPrefix[1], 10), name: sbPrefix[2].trim(), section: 'sideboard' });
+        continue;
+      }
+      const match = line.match(/^(\d+)\s+(.+)$/);
+      if (match) result.push({ qty: parseInt(match[1], 10), name: match[2].trim(), section });
+    }
+    return result;
+  }
+
+  async function lookupCard(name: string): Promise<Card | null> {
+    const qs = `name=${encodeURIComponent(name)}&pageSize=10`;
+    let rows: ApiCard[];
+    if (isStaticExport()) {
+      const result = await fetchStaticCards(qs);
+      rows = result.data as ApiCard[];
+    } else {
+      const resp = await fetch(`/api/cards?${qs}`);
+      if (!resp.ok) return null;
+      const data = await resp.json() as { data: ApiCard[] };
+      rows = data.data ?? [];
+    }
+    const exact = rows.find(r => r.name === name) ?? rows[0] ?? null;
+    return exact ? parseDbCard(exact) : null;
+  }
+
+  async function handleImport() {
+    setImportLoading(true);
+    setImportError('');
+    const parsed = parseDeckList(importText);
+    if (parsed.length === 0) {
+      setImportError('No card entries found. Use the format: "4 Card Name"');
+      setImportLoading(false);
+      return;
+    }
+
+    const notFound: string[] = [];
+    const newEntries: DeckCard[] = [];
+    const newSideboard: DeckCard[] = [];
+
+    const uniqueNames = [...new Set(parsed.map(p => p.name))];
+    const cardMap = new Map<string, Card>();
+    await Promise.all(
+      uniqueNames.map(async (name) => {
+        const card = await lookupCard(name);
+        if (card) cardMap.set(name, card);
+        else notFound.push(name);
+      })
+    );
+
+    for (const { name, qty, section } of parsed) {
+      const card = cardMap.get(name);
+      if (!card) continue;
+      if (section === 'sideboard') {
+        newSideboard.push({ card, quantity: qty });
+      } else {
+        newEntries.push({ card, quantity: qty });
+      }
+    }
+
+    if (notFound.length > 0) {
+      setImportError(`Cards not found: ${notFound.join(', ')}`);
+    }
+
+    if (newEntries.length > 0 || newSideboard.length > 0) {
+      importEntries(newEntries, newSideboard);
+    }
+
+    setImportLoading(false);
+    if (notFound.length === 0) {
+      setShowImport(false);
+      setImportText('');
     }
   }
 
@@ -110,6 +212,57 @@ export function DeckSidebar({ selectedSlug, onSelectCard }: DeckSidebarProps) {
           </div>
         </div>
       )}
+      {/* ── Import modal ─────────────────────────────────────────── */}
+      {showImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="w-[28rem] max-w-[90vw] rounded-lg border border-gray-700 bg-gray-950 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
+              <h3 className="text-sm font-semibold text-gray-100">Import Deck — Omnidex Format</h3>
+              <button
+                type="button"
+                onClick={() => { setShowImport(false); setImportText(''); setImportError(''); }}
+                className="text-gray-500 hover:text-gray-200"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-4">
+              <p className="mb-2 text-[11px] text-gray-400">
+                Paste a deck list. Sections: <span className="font-mono text-gray-300"># Material Deck</span>,{' '}
+                <span className="font-mono text-gray-300"># Main Deck</span>,{' '}
+                <span className="font-mono text-gray-300"># Sideboard</span>. Each line: <span className="font-mono text-gray-300">4 Card Name</span>
+              </p>
+              <textarea
+                value={importText}
+                onChange={e => { setImportText(e.target.value); setImportError(''); }}
+                placeholder={'# Material Deck\n1 Champion Name\n\n# Main Deck\n4 Card Name\n\n# Sideboard\n2 Side Card'}
+                className="h-64 w-full resize-none rounded border border-gray-700 bg-gray-900 px-3 py-2 font-mono text-xs text-gray-200 placeholder-gray-600 focus:border-blue-600 focus:outline-none"
+                disabled={importLoading}
+              />
+              {importError && (
+                <p className="mt-2 text-[11px] text-red-400">{importError}</p>
+              )}
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleImport}
+                  disabled={importLoading || !importText.trim()}
+                  className="rounded border border-blue-700 bg-blue-900/50 px-4 py-1.5 text-xs text-blue-200 hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {importLoading ? 'Importing…' : 'Import'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowImport(false); setImportText(''); setImportError(''); }}
+                  className="rounded border border-gray-800 bg-gray-950 px-4 py-1.5 text-xs text-gray-400 hover:border-gray-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ── Header ─────────────────────────────────────────────────── */}
       <div className="shrink-0 border-b border-gray-800 bg-[#0f1520] px-4 py-3">
         <div className="flex items-start justify-between gap-3">
@@ -128,6 +281,14 @@ export function DeckSidebar({ selectedSlug, onSelectCard }: DeckSidebarProps) {
               title="Export deck"
             >
               Export
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowImport(true); setImportError(''); }}
+              className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-300 transition-colors hover:border-green-600 hover:text-green-300"
+              title="Import deck"
+            >
+              Import
             </button>
             <button
               type="button"
@@ -167,6 +328,7 @@ export function DeckSidebar({ selectedSlug, onSelectCard }: DeckSidebarProps) {
         </div>
 
         {activeTab === 'deck' && <ManaCurve entries={entries} />}
+        {activeTab === 'deck' && <PriceBar entries={entries} sideboardEntries={sideboardEntries} />}
       </div>
 
       {/* ── Content ────────────────────────────────────────────────── */}
@@ -187,6 +349,7 @@ export function DeckSidebar({ selectedSlug, onSelectCard }: DeckSidebarProps) {
                 <DeckEntry
                   key={entry.card.slug}
                   entry={entry}
+                  price={prices[entry.card.name]}
                   selected={entry.card.slug === selectedSlug}
                   onSelect={() => onSelectCard(entry.card)}
                   onAdd={() => addCard(entry.card)}
@@ -212,6 +375,7 @@ export function DeckSidebar({ selectedSlug, onSelectCard }: DeckSidebarProps) {
                 <DeckEntry
                   key={entry.card.slug}
                   entry={entry}
+                  price={prices[entry.card.name]}
                   selected={entry.card.slug === selectedSlug}
                   onSelect={() => onSelectCard(entry.card)}
                   onAdd={() => addCard(entry.card)}
@@ -248,6 +412,7 @@ export function DeckSidebar({ selectedSlug, onSelectCard }: DeckSidebarProps) {
                 <DeckEntry
                   key={entry.card.slug}
                   entry={entry}
+                  price={prices[entry.card.name]}
                   selected={entry.card.slug === selectedSlug}
                   onSelect={() => onSelectCard(entry.card)}
                   onAdd={() => addToSideboard(entry.card)}
@@ -305,9 +470,10 @@ function EmptyZone({ hint }: { hint: string }) {
 // ── Deck entry row ───────────────────────────────────────────────────────────
 
 function DeckEntry({
-  entry, selected, onSelect, onAdd, onRemove, onRemoveAll, onHover, onHoverEnd,
+  entry, price, selected, onSelect, onAdd, onRemove, onRemoveAll, onHover, onHoverEnd,
 }: {
   entry: DeckCard;
+  price?: PriceEntry;
   selected: boolean;
   onSelect: () => void;
   onAdd: () => void;
@@ -339,6 +505,9 @@ function DeckEntry({
         <p className="truncate text-xs text-gray-200">{card.name}</p>
         <p className="truncate text-[11px] text-gray-600">
           {card.release.setCode} · {card.release.collectorNumber}
+          {price && (
+            <span className="text-emerald-700"> · {formatPrice(price.cents, price.currency)}</span>
+          )}
         </p>
       </div>
 
@@ -370,6 +539,87 @@ function DeckEntry({
       </div>
     </div>
   );
+}
+
+// ── Price bar ─────────────────────────────────────────────────────────────────
+
+function PriceBar({
+  entries,
+  sideboardEntries,
+}: {
+  entries: DeckCard[];
+  sideboardEntries: DeckCard[];
+}) {
+  const { prices, isLoading, error, fetchPricesForDeck } = usePriceStore();
+
+  // Calculate deck total (main + material; not sideboard)
+  let totalCents = 0;
+  let hasPrices = false;
+  for (const e of entries) {
+    const p = prices[e.card.name];
+    if (p) {
+      totalCents += p.cents * e.quantity;
+      hasPrices = true;
+    }
+  }
+
+  // Find most recent updatedAt across all prices in this deck
+  let lastUpdated: string | null = null;
+  for (const e of entries) {
+    const p = prices[e.card.name];
+    if (p && (!lastUpdated || p.updatedAt > lastUpdated)) lastUpdated = p.updatedAt;
+  }
+
+  const allEntries = [...entries, ...sideboardEntries];
+
+  return (
+    <div className="mt-2 border-t border-gray-800/60 pt-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          {isLoading ? (
+            <span className="text-[11px] text-gray-500 animate-pulse">Fetching prices…</span>
+          ) : hasPrices ? (
+            <>
+              <span className="text-xs font-semibold text-emerald-400">
+                ${(totalCents / 100).toFixed(2)}
+              </span>
+              {lastUpdated && (
+                <span className="ml-1.5 text-[10px] text-gray-600">
+                  {formatAge(lastUpdated)}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-[11px] text-gray-600">No prices cached</span>
+          )}
+          {error && (
+            <p className="mt-0.5 text-[10px] text-red-500 leading-snug" title={error}>
+              {error.length > 60 ? error.slice(0, 60) + '…' : error}
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          disabled={isLoading || allEntries.length === 0}
+          onClick={() => fetchPricesForDeck(entries, sideboardEntries)}
+          className="shrink-0 rounded border border-gray-700 bg-gray-900 px-2 py-1 text-[11px] text-gray-300 transition-colors hover:border-emerald-700 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+          title="Fetch latest prices from CardTrader"
+        >
+          {isLoading ? '…' : '↻ Prices'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function formatAge(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 // ── Mana curve ───────────────────────────────────────────────────────────────

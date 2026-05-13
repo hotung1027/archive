@@ -12,6 +12,7 @@ The app supports rich card filtering, deck construction, card printing details, 
 - Build main, material, and sideboard lists with copy-limit validation.
 - Inspect card printings, art variants, effects, rules, flavor text, and source payloads.
 - Export a static JSON card dataset for GitHub Pages hosting.
+- Fetch on-demand card prices from TCG Player (via TCG Tracking) with a single click (prices cached in the browser, no API key required).
 
 ## Requirements
 
