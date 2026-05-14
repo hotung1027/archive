@@ -1,6 +1,6 @@
 # OmniSearch
 
-OmniSearch is a Grand Archive TCG card search and deck builder built with Next.js, Bun, SQLite, Drizzle ORM, and React.
+OmniSearch is a free, open-source Grand Archive TCG card search and deck builder designed to make deckbuilding faster and more functional for everyone.
 
 The app supports rich card filtering, deck construction, card printing details, effect text rendering, and static GitHub Pages deployment.
 
